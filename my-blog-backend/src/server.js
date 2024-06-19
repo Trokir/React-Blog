@@ -1,52 +1,95 @@
-import express from 'express'
+import express from 'express';
+import { MongoClient } from 'mongodb';
+import { ConnectToDb, DisconnectFromDb } from './db';
 
-let articleInfo = [
-    {
-        name: 'learn-react',
-        upvotes: 0,
-        comments: []
-    },
-    {
-        name: 'learn-node',
-        upvotes: 0,
-        comments: []
-    },
-    {
-        name: 'learn-mongoDb',
-        upvotes: 0,
-        comments: []
-    },
-]
 const app = express();
+const uri = 'mongodb://127.0.0.1:27017';
+export const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+export let db;
 
-app.use(express.json())
+app.use(express.json());
 
-app.put('/api/articles/:name/upvote', (req, res) => {
+app.use(ConnectToDb);
+
+app.get('/api/articles/:name', async (req, res) => {
     const { name } = req.params;
-    const article = articleInfo.find(a => a.name === name);
-    if (article) {
-        article.upvotes += 1;
-        res.send(`The ${name} now has  ${article.upvotes} upvotes !!!!!`);
-    }
-    else {
-        res.send('This article doesn\'t exist');
+    try {
+        const article = await req.db.collection('articles').findOne({ name });
+        if (article) {
+            res.json(article);
+        } else {
+            res.status(404).json({ error: 'Article not found' });
+        }
+    } catch (error) {
+        console.error('Error fetching article:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
+app.get('/api/articles', async (req, res) => {
+    try {
+        const collInfos = await req.db.listCollections().toArray();
+        console.log('Collections in the database:');
+        collInfos.forEach((coll) => {
+            console.log(coll.name);
+        });
+        res.json(collInfos);
+    } catch (error) {
+        console.error('Error fetching collection info:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
+app.get('/api/hello', (req, res) => {
+    res.send("Hello, world!");
+});
 
-app.post('/api/articles/:name/comments', (req, res) => {
+app.put('/api/articles/:name/upvote', async (req, res) => {
+    const { name } = req.params;
+    try {
+        await req.db.collection('articles').updateOne({ name }, {
+            $inc: { upvotes: 1 }
+        });
+        const article = await req.db.collection('articles').findOne({ name });
+        if (article) {
+            res.send(`The ${name} now has ${article.upvotes} upvotes !!!!!`);
+        } else {
+            res.status(404).json({ error: 'Article not found' });
+        }
+    } catch (error) {
+        console.error('Error fetching article:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/articles/:name/comments', async (req, res) => {
+    const { name } = req.params;
     const { postedBy, text } = req.body;
-    const { name } = req.params;
-    const article = articleInfo.find(a => a.name === name);
-    if (article) {
-        article.comments.push({ postedBy, text });
-        res.send(article.comments);
-    }
-    else {
-        res.send('This article doesn\'t exist');
+    try {
+        await req.db.collection('articles').updateOne(
+            { name },
+            {
+                $push: {
+                    comments: {
+                        postedBy,
+                        text
+                    }
+                }
+            }
+        );
+        const article = await req.db.collection('articles').findOne({ name });
+        if (article) {
+            res.send(article.comments);
+        } else {
+            res.status(404).json({ error: 'Article not found' });
+        }
+    } catch (error) {
+        console.error('Error fetching article:', error);
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
+
+app.use(DisconnectFromDb);
 
 app.listen(8000, () => {
     console.log('Server is listening on port 8000');
