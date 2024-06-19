@@ -1,13 +1,41 @@
 import express from 'express';
 import { MongoClient } from 'mongodb';
-import { ConnectToDb, DisconnectFromDb } from './db';
 
 const app = express();
 const uri = 'mongodb://127.0.0.1:27017';
-export const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true });
-export let db;
+const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology: true });
+let db;
 
 app.use(express.json());
+
+async function ConnectToDb(req, res, next) {
+    if (!db) {
+        try {
+            await client.connect();
+            db = client.db('react-blog-db');
+            console.log('Connected to the database');
+        } catch (err) {
+            console.error('Failed to connect to the database', err);
+            res.status(500).json({ error: 'Internal server error' });
+            return;
+        }
+    }
+    req.db = db;
+    next();
+}
+
+async function DisconnectFromDb(req, res, next) {
+    if (db) {
+        try {
+            await client.close();
+            db = null;
+            console.log('Disconnected from the database');
+        } catch (err) {
+            console.error('Failed to disconnect from the database', err);
+        }
+    }
+    next();
+}
 
 app.use(ConnectToDb);
 
