@@ -1,64 +1,98 @@
 import express from 'express';
 import { db, connectToDb } from './db.js';
+import fs from 'fs'
+import admon from 'firebase-admin'
+
+
+const credentials = JSON.parse(fs.readFileSync('./credentials.json'));
+
+admon.initializeApp({
+    credential: admon.credential.cert(credentials)
+});
 
 const app = express();
 app.use(express.json());
 
+
+
+app.use(async (req, res, next) => {
+    const { authtoken } = req.headers;
+
+    if (authtoken) {
+        try {
+            req.user = await admin.auth().verifyIdToken(authtoken);
+        } catch (e) {
+            return res.sendStatus(400);
+        }
+    }
+
+    req.user = req.user || {};
+
+    next();
+});
+
+
 app.get('/api/articles/:name', async (req, res) => {
     const { name } = req.params;
+    const { uid } = req.user;
 
-    try {
-        const article = await db.collection('articles').findOne({ name });
+    const article = await db.collection('articles').findOne({ name });
 
-        if (article) {
-            res.json(article);
-        } else {
-            res.sendStatus(404);
-        }
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'An error occurred while fetching the article.' });
+    if (article) {
+        const upvoteIds = article.upvoteIds || [];
+        article.canUpvote = uid && !upvoteIds.includes(uid);
+        res.json(article);
+    } else {
+        res.sendStatus(404);
+    }
+});
+
+app.use((req, res, next) => {
+    if (req.user) {
+        next();
+    } else {
+        res.sendStatus(401);
     }
 });
 
 app.put('/api/articles/:name/upvote', async (req, res) => {
     const { name } = req.params;
+    const { uid } = req.user;
 
-    try {
-        await db.collection('articles').updateOne({ name }, { $inc: { upvotes: 1 } });
-        const article = await db.collection('articles').findOne({ name });
+    const article = await db.collection('articles').findOne({ name });
 
-        if (article) {
-            res.json(article);
-        } else {
-            res.status(404).send("That article doesn't exist");
+    if (article) {
+        const upvoteIds = article.upvoteIds || [];
+        const canUpvote = uid && !upvoteIds.includes(uid);
+   
+        if (canUpvote) {
+            await db.collection('articles').updateOne({ name }, {
+                $inc: { upvotes: 1 },
+                $push: { upvoteIds: uid },
+            });
         }
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'An error occurred while upvoting the article.' });
+
+        const updatedArticle = await db.collection('articles').findOne({ name });
+        res.json(updatedArticle);
+    } else {
+        res.send('That article doesn\'t exist');
     }
 });
 
 app.post('/api/articles/:name/comments', async (req, res) => {
     const { name } = req.params;
-    const { postedBy, text } = req.body;
+    const { text } = req.body;
+    const { email } = req.user;
 
-    if (!postedBy || !text) {
-        return res.status(400).json({ error: 'Invalid request: Both "postedBy" and "text" fields are required.' });
-    }
+    await db.collection('articles').updateOne({ name }, {
+        $push: { comments: { postedBy: email, text } },
+    });
+    const article = await db.collection('articles').findOne({ name });
 
-    try {
-        await db.collection('articles').updateOne({ name }, { $push: { comments: { postedBy, text } } });
-        const article = await db.collection('articles').findOne({ name });
-
-        if (article) {
-            res.json(article);
-        } else {
-            res.status(404).send("That article doesn't exist!");
-        }
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: 'An error occurred while adding a comment to the article.' });
+    if (article) {
+        res.json(article);
+    } else {
+        res.send('That article doesn\'t exist!');
     }
 });
 
