@@ -23,9 +23,19 @@ const AddCommentForm = ({ articleName, onArticleUpdated }) => {
                 Name:
                 <input
                     value={name}
-                    onChange={e => setName(e.target.value)}
+                    onChange={e => {
+                        // Check if the input value is not a string
+                        if (typeof e.target.value !== 'string') {
+                            // Handle the case where the input is not a string
+                            console.error('Input is not a string');
+                        } else {
+                            // If it is a string, update the state
+                            setName(e.target.value);
+                        }
+                    }}
                     type="text" />
             </label>
+
             <label>
                 Comment:
                 <textarea
